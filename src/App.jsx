@@ -278,34 +278,70 @@ const PostList = ({ items, onOpen, showCategory }) =>
     </ul>
   );
 
-const ItemList = ({ items, kind }) => {
+const ItemList = ({ items }) => {
   if (!items?.length) return <EmptyState msg="Nothing here yet." />;
   return (
-    <ul className="space-y-6 mt-8">
-      {items.map((it) => (
-        <li key={it.id} className="border-b border-current/10 pb-5">
-          <div className="flex justify-between items-baseline gap-4 mb-2 flex-wrap">
-            <h3 className="font-semibold text-lg">{it.title}</h3>
-            <span className="text-sm opacity-50 shrink-0">{it.date_label}</span>
-          </div>
-          {it.description && <p className="opacity-85">{it.description}</p>}
-          {it.meta && (
-            <div className="mt-2 flex flex-wrap gap-2 text-xs">
-              {it.meta.org && <span className="opacity-70">{it.meta.org}</span>}
-              {it.meta.place && (
-                <span className="px-2 py-0.5 rounded bg-current/10">{it.meta.place}</span>
+    <ul className="space-y-8 mt-8">
+      {items.map((it) => {
+        const primaryUrl = it.meta?.link || it.meta?.image;
+        const img = it.meta?.image;
+        return (
+          <li key={it.id} className="border-b border-current/10 pb-6">
+            <div className="flex gap-4 sm:gap-5">
+              {img && (
+                <a
+                  href={img}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="shrink-0 block w-28 sm:w-36 md:w-44"
+                >
+                  <img
+                    src={img}
+                    alt={it.title}
+                    loading="lazy"
+                    className="w-full aspect-[4/3] object-cover rounded-md border border-current/15 hover:opacity-95 transition-opacity"
+                  />
+                </a>
               )}
-              {it.meta.context && <span className="opacity-70">@ {it.meta.context}</span>}
-              {Array.isArray(it.meta.tech) && it.meta.tech.map((t) => (
-                <span key={t} className="px-2 py-0.5 rounded bg-current/5 border border-current/15">{t}</span>
-              ))}
-              {it.meta.link && (
-                <a href={it.meta.link} target="_blank" rel="noreferrer" className="underline opacity-80">link →</a>
-              )}
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between items-baseline gap-3 mb-1 flex-wrap">
+                  {primaryUrl ? (
+                    <a
+                      href={primaryUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-semibold text-base sm:text-lg hover:underline underline-offset-2"
+                    >
+                      {it.title}
+                    </a>
+                  ) : (
+                    <h3 className="font-semibold text-base sm:text-lg">{it.title}</h3>
+                  )}
+                  <span className="text-xs sm:text-sm opacity-50 shrink-0">{it.date_label}</span>
+                </div>
+                {it.description && (
+                  <p className="opacity-85 text-sm sm:text-base">{it.description}</p>
+                )}
+                {it.meta && (
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs items-center">
+                    {it.meta.org && <span className="opacity-70">{it.meta.org}</span>}
+                    {it.meta.place && (
+                      <span className="px-2 py-0.5 rounded bg-current/10">{it.meta.place}</span>
+                    )}
+                    {it.meta.context && <span className="opacity-70">@ {it.meta.context}</span>}
+                    {Array.isArray(it.meta.tech) && it.meta.tech.map((t) => (
+                      <span key={t} className="px-2 py-0.5 rounded bg-current/5 border border-current/15">{t}</span>
+                    ))}
+                    {it.meta.link && (
+                      <a href={it.meta.link} target="_blank" rel="noreferrer" className="underline opacity-80">link →</a>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-        </li>
-      ))}
+          </li>
+        );
+      })}
     </ul>
   );
 };
@@ -371,7 +407,7 @@ const CategoryItemsPage = ({ category, navigate }) => {
         onNav={navigate}
       />
       <PageTitle>{CATEGORY_LABEL[category]}</PageTitle>
-      {data === null ? <Spinner /> : <ItemList items={data} kind={dbCat} />}
+      {data === null ? <Spinner /> : <ItemList items={data} />}
     </article>
   );
 };
