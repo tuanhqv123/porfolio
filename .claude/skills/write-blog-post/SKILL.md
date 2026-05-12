@@ -1,23 +1,27 @@
 ---
 name: write-blog-post
-description: Use when the user wants to publish a blog post to their personal site (porfolio). Tells the model how to call the Supabase REST API to insert a row into the posts table, how to upload images to Supabase Storage, and what markdown features the renderer supports (LaTeX, code blocks with syntax highlight, Mermaid diagrams/charts, tables, images).
+description: Use when the user wants to publish a blog post to Tuan Tran's personal site. Covers the Supabase REST API call to insert into the posts table, how to upload and embed images (Supabase Storage with detailed naming/sizing guidance + free alternatives), and every markdown feature the renderer supports (GFM, LaTeX, syntax-highlighted code, Mermaid diagrams/charts, tables).
 ---
 
 # Publish a post to Tuan Tran's portfolio
 
-Insert a row into `public.posts`. The React app fetches and renders it immediately — no build, no deploy step.
+The site lives at **https://adib-clone.vercel.app** and reads posts from Supabase at runtime. Inserting a row into `public.posts` publishes it instantly — no build, no redeploy.
 
-> **Stack already installed in this project**: `react-markdown` + `remark-gfm` + `remark-math` + `rehype-katex` + `react-syntax-highlighter` + `mermaid`. The renderer lives at `src/components/Markdown.jsx`. Don't reinstall.
+> **Already installed**: `react-markdown` + `remark-gfm` + `remark-math` + `rehype-katex` + `react-syntax-highlighter` + `mermaid` + `katex` CSS. Renderer at `src/components/Markdown.jsx`. **Do not reinstall.**
 
-## When to use
+## When to use this skill
 
 User says any of:
-- "viết bài về …" / "write a post about …"
+- "viết bài về X" / "write a post about X"
 - "publish bài này" / "đăng cái này lên"
 - "ghi blog / nhật ký / coding note"
-- Or shares notes and asks them to be turned into a post.
+- Hands you raw notes and asks you to turn them into a post.
 
-## API — insert a post
+If the user already has a draft, your job is mostly: pick category + slug, upload any images, format the markdown, insert via REST.
+
+---
+
+## 1) Insert a post — REST API
 
 ### Endpoint
 
@@ -28,48 +32,42 @@ POST https://fuipokwzlcysrtagoinl.supabase.co/rest/v1/posts
 ### Headers
 
 ```
-apikey:        <VITE_SUPABASE_PUBLISHABLE_KEY>
-Authorization: Bearer <VITE_SUPABASE_PUBLISHABLE_KEY>
+apikey:        $VITE_SUPABASE_PUBLISHABLE_KEY
+Authorization: Bearer $VITE_SUPABASE_PUBLISHABLE_KEY
 Content-Type:  application/json
 Prefer:        return=representation
 ```
 
-Key lives in `.env.local`. If INSERT is blocked by RLS, fall back to psql with the project owner's DB password or the Supabase Dashboard SQL editor.
+The publishable key is in the project's `.env.local`. Frontend already uses it. RLS allows public INSERT on `posts` — no auth needed.
 
 ### Body
 
-```json
-{
-  "slug": "kebab-case-unique-slug",
-  "category": "coding",
-  "title": "Post title",
-  "excerpt": "Optional one-line summary",
-  "body": "Markdown content...",
-  "date_label": "2026",
-  "published": true
-}
-```
-
-| Field        | Required | Notes                                              |
-|--------------|----------|----------------------------------------------------|
-| `slug`       | yes      | unique, kebab-case ASCII, no diacritics            |
-| `category`   | yes      | one of: `coding`, `libraries`, `infra`, `journal`  |
-| `title`      | yes      | plain text                                         |
-| `body`       | yes      | markdown — see "Markdown features" below           |
-| `excerpt`    | no       | one-line summary                                   |
-| `date_label` | no       | display override, e.g. `"Aug 2024"`. If null, UI shows formatted `created_at` |
-| `published`  | no       | default `true`                                     |
+| Field         | Required | Type    | Notes                                                                 |
+|---------------|----------|---------|-----------------------------------------------------------------------|
+| `slug`        | yes      | text    | unique, kebab-case ASCII, no diacritics, 3–6 words                    |
+| `category`    | yes      | enum    | `coding` \| `libraries` \| `infra` \| `journal`                       |
+| `title`       | yes      | text    | plain text                                                            |
+| `body`        | yes      | text    | markdown — see §3                                                     |
+| `excerpt`     | no       | text    | one-line summary                                                      |
+| `date_label`  | no       | text    | UI override, e.g. `"Aug 2024"`. If null, UI shows formatted `created_at` |
+| `published`   | no       | bool    | default `true`                                                        |
 
 ### Category guide
 
-| category    | When to use                                                      |
-|-------------|------------------------------------------------------------------|
-| `coding`    | Technical write-ups: bugs, fixes, language/framework deep-dives  |
-| `libraries` | Reviewing or introducing a library / tool                        |
-| `infra`     | Architecture, deployment, CI/CD, devops, observability           |
-| `journal`   | Personal experiences, reflections, hackathon recaps              |
+| category    | Use for                                                                |
+|-------------|------------------------------------------------------------------------|
+| `coding`    | Technical write-ups: bugs, fixes, language / framework deep-dives      |
+| `libraries` | Introducing or reviewing a library / tool                              |
+| `infra`     | Architecture, deployment, CI/CD, devops, observability                 |
+| `journal`   | Personal experiences, reflections, hackathon recaps — "things I went through" |
 
-### Example — curl
+### Slug rules
+
+- kebab-case, ASCII only, no diacritics ("hoc-rust" not "học-rust")
+- 3–6 words, ≤ 60 chars
+- Must be unique. If insert fails with `duplicate key`, append a discriminator (`-v2`, `-pt2`, etc.)
+
+### Insert — curl example
 
 ```bash
 curl -X POST "https://fuipokwzlcysrtagoinl.supabase.co/rest/v1/posts" \
@@ -81,41 +79,183 @@ curl -X POST "https://fuipokwzlcysrtagoinl.supabase.co/rest/v1/posts" \
     "slug": "rust-tauri-window-tricks",
     "category": "coding",
     "title": "Rust + Tauri window tricks",
-    "body": "..."
+    "excerpt": "Three things I wish I knew before shipping iShot.",
+    "body": "Markdown body here. Use \\n for newlines in JSON.",
+    "date_label": "2026"
   }'
 ```
 
-### Example — psql (preferred when body has lots of quotes)
+### Insert — psql (preferred for long bodies with quotes/backticks)
 
 ```bash
-PGPASSWORD='<user-supplies>' psql \
+PGPASSWORD='<ask user>' psql \
   -h db.fuipokwzlcysrtagoinl.supabase.co -p 5432 -U postgres -d postgres <<'SQL'
-insert into public.posts (slug, category, title, body, date_label) values (
+insert into public.posts (slug, category, title, excerpt, body, date_label) values (
   'rust-tauri-window-tricks',
   'coding',
   'Rust + Tauri window tricks',
-  $$<markdown body — dollar-quoted so backticks/quotes inside don't escape>$$,
+  'Three things I wish I knew before shipping iShot.',
+  $$
+Two-sentence hook.
+
+## What I learned
+
+Paragraph with `inline code` and a code block:
+
+```rust
+fn main() { println!("hello"); }
+```
+  $$,
   '2026'
 );
 SQL
 ```
 
-## Markdown features the renderer supports
+`$$ … $$` dollar-quoting means you can paste markdown verbatim — no escaping backticks or quotes.
 
-The renderer at `src/components/Markdown.jsx` uses **react-markdown + GFM + math + KaTeX + Prism + Mermaid**. All of this works:
+### Verify before saying "done"
+
+```bash
+curl -s "https://fuipokwzlcysrtagoinl.supabase.co/rest/v1/posts?slug=eq.<slug>&select=slug,title,category,date_label,published" \
+  -H "apikey: $VITE_SUPABASE_PUBLISHABLE_KEY" \
+  -H "Authorization: Bearer $VITE_SUPABASE_PUBLISHABLE_KEY"
+```
+
+Expect a one-element JSON array. Empty → row not visible (RLS, wrong slug, or `published=false`).
+
+Then tell the user to refresh. The post appears in:
+- **Home** → "Recent writing" (top 6, across all categories)
+- **Blog** (parent) → all posts
+- **Blog → \<category\>** → filtered
+
+### Edit / unpublish / delete
+
+```sql
+update public.posts set body = $$...new markdown...$$, updated_at = now()
+ where slug = '<slug>';
+
+update public.posts set published = false where slug = '<slug>';   -- hide
+delete from public.posts where slug = '<slug>';                    -- remove
+```
+
+---
+
+## 2) Images — three ways to host them
+
+The site renders any standard markdown image:
+
+```
+![alt text describing the image](https://url-to-image.png)
+```
+
+The renderer adds lazy-loading, rounded corners, and a thin border automatically. Make `alt` descriptive — it's both accessibility and a fallback if the URL ever 404s.
+
+### Path A — Supabase Storage (RECOMMENDED; lives next to the post data)
+
+**Bucket already exists**: `post-images` — public read, 5 MB / file, image MIMEs only.
+
+#### A1. Upload via Supabase Dashboard (simplest, 30 seconds)
+
+1. Open https://supabase.com/dashboard/project/fuipokwzlcysrtagoinl/storage/buckets/post-images
+2. Click **"Upload file"** (or create a folder first using **"Create folder"**).
+3. Recommended folder layout: `posts/<year>/<slug>/<filename>`
+   Example: `posts/2026/rust-tauri-window-tricks/cover.png`
+4. After upload, click the file → **"Copy URL"** → use it as the image src.
+
+Public URL pattern:
+
+```
+https://fuipokwzlcysrtagoinl.supabase.co/storage/v1/object/public/post-images/posts/2026/rust-tauri-window-tricks/cover.png
+```
+
+#### A2. Upload via REST API (programmatic, needs service-role key)
+
+The **publishable** key can **only read**, not upload. To upload via API you need the **service-role** key (ask the user; it lives in Supabase Dashboard → Project Settings → API → `service_role` secret — **never commit, never expose in frontend**).
+
+```bash
+SR="<service-role-key>"   # never log or echo this
+curl -X POST \
+  "https://fuipokwzlcysrtagoinl.supabase.co/storage/v1/object/post-images/posts/2026/<slug>/cover.png" \
+  -H "apikey: $SR" \
+  -H "Authorization: Bearer $SR" \
+  -H "Content-Type: image/png" \
+  --data-binary "@./cover.png"
+```
+
+On success, the public URL is `https://fuipokwzlcysrtagoinl.supabase.co/storage/v1/object/public/post-images/posts/2026/<slug>/cover.png`.
+
+#### A3. Upload via Supabase CLI (if installed)
+
+```bash
+supabase storage cp ./cover.png ss://post-images/posts/2026/<slug>/cover.png
+```
+
+Returns the storage object key; build the public URL with the pattern above.
+
+### Path B — Free alternatives (no Supabase Storage needed)
+
+Use any of these when the user prefers not to touch Supabase Storage:
+
+| Host        | Public URL pattern                                                       | Pros / cons                                                  |
+|-------------|--------------------------------------------------------------------------|--------------------------------------------------------------|
+| **GitHub (raw)** | `https://raw.githubusercontent.com/<user>/<repo>/<branch>/<path>`  | Free, versioned, CDN-cached. Need a public repo.             |
+| **Cloudinary**   | `https://res.cloudinary.com/<cloud>/image/upload/<path>`           | Free tier, auto optimization, on-the-fly resize via URL.     |
+| **Imgur**        | `https://i.imgur.com/<id>.png`                                     | Free anon upload via API. Posts may be aged-out for inactivity. |
+| **ImgBB**        | `https://i.ibb.co/<id>/<name>.png`                                 | Free, simple API with a key.                                 |
+| **Vercel Blob**  | `https://<id>.public.blob.vercel-storage.com/<path>`               | If user already uses Vercel; requires a token.               |
+
+For a post that needs to look good for years, prefer **Supabase Storage** or **GitHub raw** (under the user's own repo, so it can't disappear).
+
+### Path C — Inline screenshots only? Use a data URL
+
+For tiny diagrams / one-off screenshots you don't want to host:
+
+```
+![small icon](data:image/png;base64,iVBORw0KGgoAAAANSUhEUg...)
+```
+
+Not recommended for anything larger than ~10 KB — it bloats the post row.
+
+### Image sizing & format tips
+
+- **Max width that the renderer shows**: about 700 px (content column max-width). Bigger images downscale automatically but waste bandwidth.
+- **Optimal upload size**: 1400 px wide @ 80% JPEG quality, or PNG for screenshots with text.
+- **For screenshots with UI text**: PNG keeps text crisp; JPEG smears it.
+- **For photos**: WebP or JPEG.
+- **GIFs / video**: avoid GIF; convert to WebP animation or MP4 (currently the renderer doesn't handle `<video>` — link out instead).
+- **SVG**: works (`image/svg+xml` is in the allowed MIME list), but sanitize untrusted SVGs to strip scripts.
+- **Naming**: lowercase, kebab-case, descriptive — `vim-jump-list.png`, not `Screenshot 2026-05-12.png`.
+
+### Image alt text — a quick rule
+
+`![A 5-line vim jump list showing positions across three files](url)` is better than `![image](url)`. Describe what's *in* it.
+
+---
+
+## 3) Markdown features the renderer supports
+
+All standard GitHub-flavored markdown plus math and diagrams. Test anything unusual in a draft post first if uncertain.
 
 ### Text
 
-- Paragraphs (blank line between)
-- **bold**, *italic*, ~~strikethrough~~
-- Links: `[text](https://…)` — external links auto-open in new tab
-- Inline code: `` `like this` ``
-- Headings: `## H2`, `### H3` (avoid `#` H1 — title is rendered separately)
-- Lists (ordered and unordered)
-- Blockquotes (`> …`)
-- Tables (GFM pipe syntax)
+- Paragraphs (blank line between blocks)
+- `**bold**`, `*italic*`, `~~strikethrough~~`
+- `[link text](https://…)` — external links open in a new tab automatically
+- `` `inline code` ``
+- Headings: `## H2`, `### H3`. **Avoid `# H1`** — the page title is rendered separately.
+- Lists: `- item` (unordered) and `1. item` (ordered)
+- Blockquotes: `> Quoted text`
+- Tables (GFM pipe syntax):
 
-### Code blocks (syntax-highlighted with Prism / oneDark)
+  ```
+  | Col A | Col B |
+  | ----- | ----- |
+  | foo   | bar   |
+  ```
+
+### Code blocks — syntax highlighted
+
+Fence with three backticks and a language tag:
 
 ````
 ```python
@@ -124,11 +264,13 @@ def hello():
 ```
 ````
 
-Supported languages: any Prism language tag (`python`, `js`, `ts`, `tsx`, `rust`, `go`, `bash`, `sql`, `json`, `yaml`, `css`, `html`, …).
+Any Prism-supported language works: `python`, `js`, `ts`, `tsx`, `rust`, `go`, `bash`, `sql`, `json`, `yaml`, `css`, `html`, `dockerfile`, `nginx`, `toml`, `lua`, `c`, `cpp`, `csharp`, `java`, `kotlin`, `swift`, …
+
+Omit the language for plain monospace blocks.
 
 ### LaTeX (KaTeX)
 
-Inline: `$E = mc^2$` → renders inline.
+Inline: `The cost is $O(n \log n)$.`
 
 Block:
 
@@ -138,153 +280,109 @@ $$
 $$
 ```
 
+Escape a literal `$` in prose: `\$`. Malformed LaTeX renders as red error text — test complex expressions on [katex.org](https://katex.org).
+
 ### Mermaid diagrams & charts
 
-Use a `mermaid` code block:
+Use a `mermaid` code block. Mermaid handles flowcharts, sequence diagrams, class/state/ER diagrams, gantt, pie charts, mindmaps, timeline, and `xychart-beta` for line/bar charts.
 
 ````
 ```mermaid
 flowchart LR
   A[Client] -->|HTTPS| B(API Gateway)
-  B --> C{Auth?}
+  B --> C{Authenticated?}
   C -->|yes| D[Service]
   C -->|no| E[401]
 ```
 ````
 
-Mermaid handles flowcharts, sequence, class, state, ER, gantt, pie charts, mindmaps, timeline, and `xychart-beta` for line/bar charts. The renderer re-themes diagrams when the user toggles dark mode.
+Pie chart:
 
-### Images
+````
+```mermaid
+pie title Latency budget
+  "Inference" : 55
+  "I/O" : 25
+  "Pre/post" : 20
+```
+````
+
+Sequence:
+
+````
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant A as App
+  participant DB as Supabase
+  U->>A: open /blog/coding
+  A->>DB: select posts where category='coding'
+  DB-->>A: rows
+  A-->>U: render
+```
+````
+
+Diagrams retheme automatically when the user toggles dark mode. Test syntax at [mermaid.live](https://mermaid.live) first — a syntax error in a diagram renders as a red error block.
+
+### Images (covered in §2)
 
 ```
-![alt text](https://fuipokwzlcysrtagoinl.supabase.co/storage/v1/object/public/post-images/posts/2026/screenshot.png)
+![Latency breakdown bar chart](https://.../latency.png)
 ```
 
-Images get lazy-loaded, rounded corners, and a thin border automatically.
+### Things the renderer does NOT handle
 
-## Hosting images — Supabase Storage
+- HTML embedded in markdown (sanitized away) — use markdown primitives instead
+- `<video>` tags — link out to a hosted video instead
+- Footnotes (despite GFM support, the renderer doesn't style them — avoid)
+- Custom React components in markdown — there's no MDX
 
-Bucket: **`post-images`** (already created, public read).
+---
 
-- **Max file size:** 5 MB per image
-- **Allowed MIME types:** `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/svg+xml`
+## 4) Workflow checklist — start to finish
 
-### Public URL pattern
+1. **Confirm intent** (only if unclear)
+   - Category? (coding / libraries / infra / journal)
+   - Title and slug?
+   - Any images, code blocks, math, diagrams?
 
-```
-https://fuipokwzlcysrtagoinl.supabase.co/storage/v1/object/public/post-images/<path>
-```
+2. **Draft the body** in markdown using §3 features. Match the user's voice:
+   - Concrete over abstract ("Cut latency from 4.5s to 2.2s" beats "improved performance")
+   - First-person, low ceremony
+   - Lead with the problem, end with the takeaway
+   - Code blocks should be short and self-contained
+   - For `journal`: it's OK to be informal and personal — story-shaped, not how-to-shaped
 
-Suggested path convention: `posts/<year>/<slug>/<filename>.png` so files stay organized.
+3. **Upload any images** following §2. Get the public URLs. Embed with `![alt](url)`.
 
-### Upload — Supabase Dashboard
+4. **Insert** via the REST or psql example in §1.
 
-1. Supabase → Storage → `post-images` → Upload file (or create folder first).
-2. Click the file, copy "Public URL".
-3. Paste into the markdown body as `![alt](url)`.
+5. **Verify** with the curl in §1. Then tell the user to refresh.
 
-This is the simplest path; recommend it to the user unless they specifically want CLI/API upload.
+---
 
-### Upload — REST API (only if INSERT policy allows it)
+## 5) Pitfalls
 
-The default storage RLS is "public read only." To enable API uploads with the publishable key, the user must add an INSERT policy on `storage.objects` for `bucket_id = 'post-images'`. Until then, the publishable key cannot upload.
+1. **Slug collisions** — `posts.slug` is unique. On collision, append a discriminator.
+2. **Category typos** — only the four enum values pass the check constraint. Others get rejected.
+3. **Image too large** — bucket rejects > 5 MB. Compress / convert first.
+4. **Wrong image MIME** — only `image/png|jpeg|gif|webp|svg+xml` accepted by `post-images` bucket.
+5. **Mermaid syntax errors** — show as red error blocks. Test at mermaid.live first.
+6. **KaTeX errors** — unbalanced `$` delimiters break rendering. Escape literal `$` as `\$`.
+7. **Forgetting `published`** — defaults to true. If explicitly false, anon key cannot read it.
+8. **Trying to upload via the publishable key** — it can only read. Use Dashboard (manual) or service-role key (API).
 
-If they enable it:
+---
 
-```bash
-curl -X POST \
-  "https://fuipokwzlcysrtagoinl.supabase.co/storage/v1/object/post-images/posts/2026/<slug>/cover.png" \
-  -H "apikey: $VITE_SUPABASE_PUBLISHABLE_KEY" \
-  -H "Authorization: Bearer $VITE_SUPABASE_PUBLISHABLE_KEY" \
-  -H "Content-Type: image/png" \
-  --data-binary "@./local-file.png"
-```
+## 6) Env reference
 
-Returns the storage object key; build the public URL with the pattern above.
-
-### Free alternatives (if you don't want Supabase Storage)
-
-| Host             | URL pattern                                            | Notes                                   |
-|------------------|--------------------------------------------------------|------------------------------------------|
-| GitHub (repo)    | `https://raw.githubusercontent.com/<u>/<r>/<branch>/<path>` | Free, versioned, cache-friendly      |
-| Cloudinary       | `https://res.cloudinary.com/<cloud>/image/upload/<path>` | Free tier, automatic optimization      |
-| Imgur            | `https://i.imgur.com/<id>.png`                         | Free, anonymous upload via API           |
-| ImgBB            | `https://i.ibb.co/<id>/<name>.png`                     | Free, has API                            |
-
-Supabase Storage is preferred because it's already integrated with auth/RLS and lives next to the post data.
-
-## Workflow — from draft to live
-
-### 1. Confirm with the user (only if unclear)
-
-- Category (`coding` / `libraries` / `infra` / `journal`)
-- Title and slug
-- Whether to include images, code, math, diagrams
-
-### 2. Draft the body
-
-Write in markdown. Use the features above. Keep paragraphs tight — the site uses a narrow reading column.
-
-**Style guidance for *Tuan's* posts:**
-- Concrete and specific over abstract ("Cut latency from 4.5s to 2.2s" beats "improved performance").
-- First-person, low ceremony, no marketing copy.
-- Lead with the problem; end with the takeaway.
-- Code blocks short and self-contained.
-- For `journal`: it's OK to be personal and informal. "Things I went through" — story-shaped, not how-to-shaped.
-
-### 3. If the post uses images
-
-For each image:
-1. Upload to Supabase Storage `post-images` bucket (path `posts/<year>/<slug>/<file>.png`)
-2. Build public URL with the pattern above
-3. Reference in markdown as `![alt](url)`
-
-### 4. Insert the post
-
-Use the REST API or psql example from "API — insert a post" above.
-
-### 5. Verify before reporting done
-
-```bash
-curl -s "https://fuipokwzlcysrtagoinl.supabase.co/rest/v1/posts?slug=eq.<slug>&select=slug,title,category,date_label" \
-  -H "apikey: $VITE_SUPABASE_PUBLISHABLE_KEY" \
-  -H "Authorization: Bearer $VITE_SUPABASE_PUBLISHABLE_KEY"
-```
-
-Expect a one-element JSON array. Empty → row not visible (RLS, wrong slug, or `published=false`).
-
-Then tell the user to refresh; the post shows up in:
-- Home → "Recent writing" (top 6)
-- Blog → all categories
-- Blog → `<category>` → filtered list
-
-### 6. Editing or unpublishing
-
-```sql
-update public.posts
-   set body = $$...new markdown...$$, updated_at = now()
- where slug = 'rust-tauri-window-tricks';
-
-update public.posts set published = false where slug = '…';
-delete from public.posts where slug = '…';
-```
-
-## Common pitfalls
-
-1. **Slug collisions** — `posts.slug` is unique; pick a different one if insert fails.
-2. **Category typos** — only the four enum values are valid; others rejected by check constraint.
-3. **Mermaid syntax errors** — render shows a red error block. Test the diagram on [mermaid.live](https://mermaid.live) first.
-4. **Image too large or wrong MIME** — bucket rejects files > 5MB or non-image MIME. Compress / convert first.
-5. **KaTeX errors** — `$…$` requires balanced delimiters. Escaping a literal `$` in prose: write `\$`.
-6. **Forgetting `published`** — defaults to true, but if explicitly set false, anon key can't see it.
-
-## Env vars expected by the frontend
-
-In `.env.local` (gitignored):
+In the project's `.env.local` (gitignored):
 
 ```
 VITE_SUPABASE_URL=https://fuipokwzlcysrtagoinl.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 ```
 
-These are loaded by `src/lib/supabase.js` at app startup.
+Loaded by `src/lib/supabase.js` at runtime.
+
+For service-role upload (API path A2), the key lives in Supabase Dashboard → Project Settings → API → `service_role`. **Never** put it in `.env.local`, never commit it, never log it.
