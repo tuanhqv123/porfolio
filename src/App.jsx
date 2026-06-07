@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Sun, Moon, Eye, Type, Menu, X as XClose } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import Markdown from './components/Markdown';
+import { Analytics } from '@vercel/analytics/react';
 
 // ---------- Social icons (inline SVG) ----------
 const Icon = ({ d, size = 16 }) => (
@@ -557,6 +558,7 @@ export default function App() {
           </button>
         )}
       </div>
+      <Analytics />
     </div>
   );
 }
