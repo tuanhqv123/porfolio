@@ -63,6 +63,85 @@ const ITEMS_DB_CATEGORY = {
   projects: 'project',
 };
 
+// ---------- URL routing ----------
+const PAGE_TO_PATH = {
+  home: '/',
+  blog: '/blog',
+  coding: '/blog/coding',
+  libraries: '/blog/libraries',
+  infra: '/blog/infra',
+  journal: '/blog/journal',
+  certs: '/certs',
+  competitions: '/competitions',
+  projects: '/projects',
+};
+
+function parseUrl() {
+  const parts = window.location.pathname.split('/').filter(Boolean);
+  if (!parts.length) return 'home';
+  if (parts[0] === 'blog') {
+    if (!parts[1]) return 'blog';
+    if (BLOG_SUBS.has(parts[1])) return parts[2] || parts[1];
+    return 'blog';
+  }
+  if (parts[0] in { certs: 1, competitions: 1, projects: 1 }) return parts[0];
+  return 'home';
+}
+
+
+// ---------- Subscribe ----------
+const SubscribeForm = () => {
+  const [email, setEmail] = useState('');
+  const [status, setStatus] = useState(() =>
+    localStorage.getItem('subscribed') ? 'ok' : 'idle'
+  );
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setStatus('loading');
+    const { error } = await supabase.from('subscribers').insert({ email: email.trim().toLowerCase() });
+    if (!error) {
+      localStorage.setItem('subscribed', '1');
+      setStatus('ok');
+    } else if (error.code === '23505') {
+      localStorage.setItem('subscribed', '1');
+      setStatus('ok');
+    } else {
+      setStatus('error');
+    }
+  };
+
+  if (status === 'ok') return null;
+
+  return (
+    <div className="mt-16 pt-10 border-t border-current/10">
+      <p className="text-sm font-medium mb-1">Stay in the loop</p>
+      <p className="text-sm opacity-55 mb-4">Get an email when I publish a new post.</p>
+      <form onSubmit={submit} className="flex gap-2 max-w-sm">
+        <input
+          type="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="your@email.com"
+          disabled={status === 'loading'}
+          className="flex-1 text-sm px-3 py-2 rounded-md border border-current bg-transparent placeholder:opacity-35 focus:outline-none disabled:opacity-40"
+        />
+        <button
+          type="submit"
+          disabled={status === 'loading'}
+          className="text-sm px-4 py-2 rounded-md border border-current hover:bg-current/5 transition-colors disabled:opacity-40 shrink-0"
+        >
+          {status === 'loading' ? '…' : 'Subscribe'}
+        </button>
+      </form>
+      {status === 'error' && (
+        <p className="text-sm opacity-55 mt-2">Something went wrong. Try again.</p>
+      )}
+    </div>
+  );
+};
 
 // ---------- Shared UI ----------
 const Breadcrumb = ({ parts, onNav }) => (
@@ -100,6 +179,67 @@ const Spinner = () => (
 const EmptyState = ({ msg }) => (
   <p className="opacity-60 italic mt-6">{msg || "Nothing here yet."}</p>
 );
+
+// ---------- SEO helpers ----------
+const SITE_URL = 'https://portfolio.tuantranon.me';
+
+function setMeta(selector, attr, value) {
+  const el = document.querySelector(selector);
+  if (el) el.setAttribute(attr, value);
+}
+
+function setPageSEO({ title, description, url, type = 'website', publishedAt, modifiedAt }) {
+  const fullTitle = title ? `${title} — Tuan Tran` : 'Tuan Tran';
+  document.title = fullTitle;
+  const canonical = document.querySelector('link[rel="canonical"]');
+  if (canonical) canonical.setAttribute('href', url || SITE_URL);
+
+  setMeta('meta[name="description"]', 'content', description || '');
+  setMeta('meta[property="og:title"]', 'content', fullTitle);
+  setMeta('meta[property="og:description"]', 'content', description || '');
+  setMeta('meta[property="og:url"]', 'content', url || SITE_URL);
+  setMeta('meta[property="og:type"]', 'content', type);
+  setMeta('meta[name="twitter:title"]', 'content', fullTitle);
+  setMeta('meta[name="twitter:description"]', 'content', description || '');
+
+  const ldScript = document.getElementById('ld-json');
+  if (type === 'article' && ldScript) {
+    ldScript.textContent = JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'BlogPosting',
+      headline: title,
+      description: description || '',
+      url: url || SITE_URL,
+      datePublished: publishedAt || '',
+      dateModified: modifiedAt || publishedAt || '',
+      author: {
+        '@type': 'Person',
+        name: 'Tuan Tran',
+        url: SITE_URL,
+      },
+      publisher: {
+        '@type': 'Person',
+        name: 'Tuan Tran',
+        url: SITE_URL,
+      },
+      mainEntityOfPage: { '@type': 'WebPage', '@id': url || SITE_URL },
+    });
+  } else if (ldScript) {
+    ldScript.textContent = JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'Person',
+      name: 'Tuan Tran',
+      url: SITE_URL,
+      sameAs: [
+        'https://github.com/tuanhqv123',
+        'https://linkedin.com/in/tuan-tran149',
+        'https://x.com/lgrd149',
+      ],
+      jobTitle: 'AI Engineer',
+      description: 'Building agentic systems, applied CV models, and infrastructure.',
+    });
+  }
+}
 
 // ---------- Date helpers ----------
 const fmtDate = (iso) =>
@@ -259,7 +399,7 @@ const PostList = ({ items, onOpen, showCategory }) =>
       {items.map((it) => (
         <li key={it.slug}>
           <button
-            onClick={() => onOpen(it.slug)}
+            onClick={() => onOpen(it.slug, it.category)}
             className="text-left w-full flex justify-between items-baseline gap-4 group py-3 border-b border-current/10"
           >
             <span className="group-hover:underline underline-offset-4">
@@ -271,7 +411,7 @@ const PostList = ({ items, onOpen, showCategory }) =>
               )}
             </span>
             <span className="text-sm opacity-50 shrink-0 tabular-nums">
-              {it.date_label || fmtDate(it.created_at)}
+              {fmtDate(it.created_at)}
             </span>
           </button>
         </li>
@@ -354,7 +494,7 @@ const HomePage = ({ navigate }) => {
       <PageTitle>Tuan Tran</PageTitle>
       <p>
         I build systems — AI agentic workflows, applied computer vision models,
-        and the infrastructure that keeps them running.
+        and the infrastructure that keeps them running and scalable.
       </p>
       <p>
         This is where I write down what I figure out along the way: libraries I
@@ -369,7 +509,7 @@ const HomePage = ({ navigate }) => {
       </p>
       <h2>Recent writing</h2>
       {posts === null ? <Spinner /> : (
-        <PostList items={posts.slice(0, 6)} onOpen={(slug) => navigate(slug)} showCategory />
+        <PostList items={posts.slice(0, 6)} onOpen={(slug, cat) => navigate(slug, { category: cat })} showCategory />
       )}
     </article>
   );
@@ -392,7 +532,7 @@ const CategoryPostsPage = ({ category, navigate }) => {
       {data === null ? (
         <Spinner />
       ) : (
-        <PostList items={data} onOpen={navigate} showCategory={isBlogIndex} />
+        <PostList items={data} onOpen={(slug, cat) => navigate(slug, { category: cat })} showCategory={isBlogIndex} />
       )}
     </article>
   );
@@ -415,6 +555,21 @@ const CategoryItemsPage = ({ category, navigate }) => {
 
 const ArticleView = ({ slug, navigate }) => {
   const { data } = usePost(slug);
+  useEffect(() => {
+    if (!data?.title) return;
+    const postUrl = `${SITE_URL}/blog/${data.category}/${slug}`;
+    setPageSEO({
+      title: data.title,
+      description: data.excerpt || data.title,
+      url: postUrl,
+      type: 'article',
+      publishedAt: data.created_at,
+      modifiedAt: data.updated_at || data.created_at,
+    });
+    return () => {
+      setPageSEO({ title: null, description: null, url: SITE_URL, type: 'website' });
+    };
+  }, [data, slug]);
   if (data === null) {
     return (
       <article className="prose-article">
@@ -445,16 +600,17 @@ const ArticleView = ({ slug, navigate }) => {
       />
       <PageTitle>{data.title}</PageTitle>
       <p className="opacity-60 text-sm mb-8">
-        {data.date_label || fmtDateTime(data.created_at)}
+        {fmtDateTime(data.created_at)}
       </p>
       <Markdown>{data.body}</Markdown>
+      <SubscribeForm />
     </article>
   );
 };
 
 // ---------- App ----------
 export default function App() {
-  const [page, setPage] = useState('home');     // can also be a post slug
+  const [page, setPage] = useState(parseUrl);
   const [dark, setDark] = useState(false);
   const [larger, setLarger] = useState(false);
   const [zen, setZen] = useState(false);
@@ -465,12 +621,25 @@ export default function App() {
   }, [dark]);
 
   useEffect(() => {
-    setMobileNavOpen(false);
     window.scrollTo({ top: 0 });
+    setMobileNavOpen(false);
+    // Update page title for SEO
+    const label = CATEGORY_LABEL[page];
+    document.title = label ? `${label} — Tuan Tran` : 'Tuan Tran';
   }, [page]);
 
+  useEffect(() => {
+    const onPop = () => setPage(parseUrl());
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
   const knownPages = new Set([...topLevel.map((t) => t.key), ...blogSubs.map((s) => s.key)]);
-  const navigate = (target) => setPage(target);
+  const navigate = (target, { category } = {}) => {
+    const path = PAGE_TO_PATH[target] ?? (category ? `/blog/${category}/${target}` : '/');
+    history.pushState(null, '', path);
+    setPage(target);
+  };
   const sidebarKey = knownPages.has(page) ? page : null;
 
   const renderContent = () => {
